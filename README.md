@@ -46,8 +46,30 @@ sudo bash setup_warp_singbox.sh
 ssh root@<YOUR_SERVER_IP> "bash -s" < setup_warp_singbox.sh
 ```
 
+### 方式 3：随时独立进行状态与属地诊断 (check-warp.sh)
+若只需排查当前 WARP IP 是否被 Google/YouTube 送中，无需重新配置 sing-box，可直接运行独立自检脚本：
+```bash
+curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.sh | bash
+```
+> [!NOTE]
+> 诊断脚本默认检测本地 SOCKS5 端口 `40000`，如使用自定义端口可直接传参，例如 `bash check-warp.sh 40001`。
+> 脚本将直观展示当前 WARP IPv4 / IPv6、Google 搜索重定向状态、YouTube 权威判定地区（解析 `VISITOR_PRIVACY_METADATA` 确认是否支持 Premium）及与 VPS 原生出口的对比：
+> ```text
+> ==============================================================
+>        Cloudflare WARP 出口 IP 与属地分流检测报告
+> ==============================================================
+>  WARP IPv4 地址 : 104.28.xxx.xxx
+>  WARP IPv6 地址 : 2a09:bac5:xxxx::xxxx
+> --------------------------------------------------------------
+>  Google 搜索状态: 正常 (未送中，停留在 google.com)
+>  YouTube 判定区 : JP (正常，解除送中，支持 YouTube Premium)
+> --------------------------------------------------------------
+>  VPS 原生出口 IP: 198.51.100.xxx (YouTube 判定: CN)
+> ==============================================================
+> ```
+
 > [!TIP]
-> 脚本具备**幂等性**与**语法回滚机制**：
+> 部署脚本具备**幂等性**与**语法回滚机制**：
 > - 自动查找常见配置文件路径（如 `/etc/vless-reality/singbox.json` 或 `/etc/sing-box/config.json`）；
 > - 修改前自动创建带时间戳的 `.bak` 备份文件；
 > - 修改后自动调用 `sing-box check` 进行语法自检，一旦出错自动瞬间回滚，确保节点安全。
@@ -258,14 +280,24 @@ echo "[*] Rule sets updated and service restarted successfully."
 3. 打开 YouTube 视频并尝试后台播放或画中画功能，一切正常。
 
 ### Q4: 申请到的 WARP IP 也有可能是“送中”的怎么办？
-- Cloudflare WARP 分配的部分 IP 段（尤其是部分 IPv6 地址）确实可能偶尔被 Google/YouTube 错误标记为 CN（送中）；
-- 本自动化脚本已内置**自动检测与防送中机制**：部署完成时会自动提取 YouTube 内部地域判定 Cookie（`VISITOR_PRIVACY_METADATA`）进行校验，若发现当前 WARP IP 为 `CN`，会自动重拨刷新 IP；
-- 若日后使用中发现送中，只需执行：
-  ```bash
-  warp-cli disconnect && warp-cli connect
-  # 查看当前分配到的 WARP IP 及属地状态
-  bash /etc/vless-reality/check-warp.sh
-  ```
+Cloudflare WARP 分配的出口 IP 同样可能被 Google/YouTube 标记为 CN。处理流程分为两个阶段：
+
+1. **自动化处理阶段**：
+   - 部署完成后，脚本自动请求 YouTube 并解析 `VISITOR_PRIVACY_METADATA` 校验地域；
+   - 若判定为 `CN`，自动执行 `warp-cli disconnect && warp-cli connect` 刷新出口 IP，最多重试 3 次；
+   - 探测到非 CN 区域后自动结束重试并输出正常报告。
+
+2. **降级告警与手动处理**：
+   - 若重试 3 次后仍为 `CN`，脚本保留 sing-box 分流配置并保持服务运行，在最终报告中标记警告；
+   - 可在服务器上重新注册客户端以获取新的 IP 租约：
+     ```bash
+     warp-cli --accept-tos registration delete
+     warp-cli --accept-tos registration new
+     warp-cli --accept-tos mode proxy
+     warp-cli --accept-tos proxy port 40000
+     warp-cli --accept-tos connect
+     bash /etc/vless-reality/check-warp.sh
+     ```
 
 ### Q5: 部署后 YouTube 为什么依然没有显示 Premium 或仍被识别为 CN？
 1. **浏览器 QUIC (HTTP/3) 缓存与长连接**：
