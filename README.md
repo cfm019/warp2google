@@ -13,16 +13,15 @@
 
 ```mermaid
 flowchart TD
-    Client["客户端 (手机 / 电脑)"]
-    Client -->|"代理连接"| Singbox["sing-box 代理服务端"]
+    Client["📱 客户端<br/>(手机 / 电脑)"] -->|"入站连接"| Singbox["⚡ sing-box 服务端<br/>(域名嗅探)"]
     
-    Singbox -->|"域名嗅探"| Router{"路由规则匹配"}
+    Singbox --> Router{"🎯 规则路由分流"}
     
-    Router -->|"Google / YouTube / Gemini"| Warp["WARP 本地代理 (127.0.0.1:40000)"]
-    Router -->|"常规互联网流量"| Direct["原生出口 (Direct)"]
+    Router -->|"Google / YouTube / Gemini"| Warp["🛡️ WARP 本地代理<br/>(127.0.0.1:40000)"]
+    Router -->|"其他常规流量"| Direct["🌐 VPS 原生出口<br/>(Direct 直连)"]
     
-    Warp -->|"Cloudflare 干净 IP"| TargetGoogle["Google 服务 (解除送中 / Premium)"]
-    Direct -->|"VPS 原生 IP"| TargetWeb["常规互联网"]
+    Warp -->|"Cloudflare 出口 IP"| TargetGoogle["✅ 解除送中 / 恢复 Premium"]
+    Direct -->|"VPS 原生出口 IP"| TargetWeb["🚀 常规互联网访问"]
 ```
 
 ---
