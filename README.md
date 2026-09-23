@@ -12,17 +12,31 @@
 ## 架构拓扑
 
 ```mermaid
-%%{init: {'themeVariables': { 'edgeLabelBackground': 'transparent' }}}%%
-flowchart TD
-    Client["客户端 (手机 / 电脑)"]
-    Client -->|"代理连接"| Singbox["sing-box 代理服务端"]
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#f8fafc',
+    'primaryTextColor': '#334155',
+    'primaryBorderColor': '#cbd5e1',
+    'lineColor': '#94a3b8',
+    'fontSize': '12px',
+    'edgeLabelBackground': '#ffffff'
+  },
+  'flowchart': {
+    'nodeSpacing': 20,
+    'rankSpacing': 28,
+    'curve': 'basis',
+    'padding': 8
+  }
+}}%%
+flowchart LR
+    Client["客户端"] -->|"代理连接"| Singbox["sing-box 服务端"]
+    Singbox -->|"域名嗅探"| Router(["分流规则匹配"])
     
-    Singbox -->|"域名嗅探"| Router{"路由规则匹配"}
+    Router -->|"Google 流量"| Warp["WARP 代理 (40000)"]
+    Router -->|"常规流量"| Direct["原生出口 Direct"]
     
-    Router -->|"Google / YouTube / Gemini"| Warp["WARP 本地代理 (127.0.0.1:40000)"]
-    Router -->|"常规互联网流量"| Direct["原生出口 (Direct)"]
-    
-    Warp -->|"Cloudflare 干净 IP"| TargetGoogle["Google 服务 (解除送中 / Premium)"]
+    Warp -->|"CF 干净 IP"| TargetGoogle["Google 服务 (解除送中)"]
     Direct -->|"VPS 原生 IP"| TargetWeb["常规互联网"]
 ```
 
