@@ -166,10 +166,13 @@ if not has_quic_reject:
     idx = 1 if len(rules) > 0 and rules[0].get("action") == "sniff" else 0
     rules.insert(idx, quic_rule)
 
-# 确保 Google / YouTube / GeoIP 路由规则存在
+# 确保 Google / YouTube / GeoIP 路由规则存在 (转发至 warp-out)
 target_rule_sets = ["geosite-google", "geosite-youtube", "geoip-google"]
 rule_exists = False
 for r in rules:
+    # 忽略用于拦截 QUIC 的 reject 规则
+    if r.get("action") == "reject":
+        continue
     rs = r.get("rule_set", [])
     if isinstance(rs, list) and any(x in rs for x in ["geosite-google", "geosite-youtube"]):
         for t in target_rule_sets:
