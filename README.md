@@ -12,16 +12,17 @@
 ## 架构拓扑
 
 ```mermaid
-flowchart LR
-    Client["客户端 (手机 / 电脑)"] -->|"VLESS / Hysteria2 / SS"| Singbox["sing-box 代理服务端"]
+flowchart TD
+    Client["客户端 (手机 / 电脑)"]
+    Client -->|"代理连接"| Singbox["sing-box 代理服务端"]
     
-    Singbox -->|"域名嗅探与规则匹配"| Router{"路由分流 (Route)"}
+    Singbox -->|"域名嗅探"| Router{"路由规则匹配"}
     
     Router -->|"Google / YouTube / Gemini"| Warp["WARP 本地代理 (127.0.0.1:40000)"]
-    Router -->|"其他常规流量"| Direct["原生出口 (Direct)"]
+    Router -->|"常规互联网流量"| Direct["原生出口 (Direct)"]
     
-    Warp -->|"Cloudflare 干净 IP 出口"| TargetGoogle["Google / YouTube / Gemini"]
-    Direct -->|"VPS 原生 IP 出口"| TargetWeb["常规互联网"]
+    Warp -->|"Cloudflare 干净 IP"| TargetGoogle["Google 服务 (解除送中 / Premium)"]
+    Direct -->|"VPS 原生 IP"| TargetWeb["常规互联网"]
 ```
 
 ---
