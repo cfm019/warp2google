@@ -4,7 +4,7 @@
 
 通过配置官方 **Cloudflare WARP 运行于本地 SOCKS5 代理模式**，并结合 **sing-box 规则路由分流**，实现：
 - 目标流量分流：Google、YouTube、Gemini 相关域名及 IP 流量经由 Cloudflare WARP 出口送达；
-- 其他常规流量仍走 VPS 原生网络出口，避免无谓的全局套娃与性能损耗；
+- 其他常规流量仍走 VPS 原生网络出口，避免性能损耗；
 - WARP 仅监听于本地回环地址（`127.0.0.1:40000`），不接管 VPS 主网关与路由表，不影响 SSH 远程连接与原有服务。
 
 ---
@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.
 > 部署脚本具备**幂等性**与**语法回滚机制**：
 > - 自动查找常见配置文件路径（如 `/etc/vless-reality/singbox.json` 或 `/etc/sing-box/config.json`）；
 > - 修改前自动创建带时间戳的 `.bak` 备份文件；
-> - 修改后自动调用 `sing-box check` 进行语法自检，一旦出错自动瞬间回滚，确保节点安全。
+> - 修改后自动调用 `sing-box check` 进行语法自检，出错自动回滚。
 
 ---
 
