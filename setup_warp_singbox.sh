@@ -102,16 +102,6 @@ for i in {1..10}; do
     sleep 1
 done
 
-# 校验本地 SOCKS5 出口
-WARP_TEST="$(curl -s -x "socks5://127.0.0.1:${WARP_PORT}" https://api.ip.sb/geoip || true)"
-if echo "$WARP_TEST" | grep -qi "Cloudflare"; then
-    WARP_IP="$(echo "$WARP_TEST" | grep -oP '(?<="ip":")[^"]+' || true)"
-    WARP_COUNTRY="$(echo "$WARP_TEST" | grep -oP '(?<="country":")[^"]+' || true)"
-    log_succ "WARP SOCKS5 测试正常 (出口 IP: $WARP_IP, 地区: $WARP_COUNTRY)"
-else
-    log_warn "WARP SOCKS5 暂未返回 Cloudflare 信息，可能正在建立连接中..."
-fi
-
 # 6. 下载 / 更新分流规则集
 log_info "下载最新的 Google / YouTube 规则集到 $CONFIG_DIR ..."
 curl -sSL https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs -o "$CONFIG_DIR/geosite-google.srs"
@@ -157,13 +147,31 @@ rule_set = route.get("rule_set", [])
 if not any(r.get("action") == "sniff" for r in rules):
     rules.insert(0, {"action": "sniff"})
 
+# 确保拦截 Google / YouTube 的 QUIC (UDP 443) 流量
+# 原因：WARP 本地 SOCKS5 不支持 UDP，且 Chrome 默认优先使用 QUIC (UDP 443)。
+# 若不拦截 QUIC，浏览器对 YouTube 的请求会绕过 WARP 走直连导致依然“送中”。拦截后浏览器会自动平滑降级为 TCP (TLS 1.3 / HTTP2) 经由 WARP 转发。
+quic_rule = {
+    "network": "udp",
+    "port": 443,
+    "rule_set": ["geosite-google", "geosite-youtube"],
+    "action": "reject"
+}
+# 避免重复插入
+has_quic_reject = any(
+    r.get("action") == "reject" and r.get("network") == "udp" and 443 in ([r.get("port")] if isinstance(r.get("port"), int) else r.get("port", []))
+    for r in rules
+)
+if not has_quic_reject:
+    # 插入在 sniff 之后
+    idx = 1 if len(rules) > 0 and rules[0].get("action") == "sniff" else 0
+    rules.insert(idx, quic_rule)
+
 # 确保 Google / YouTube / GeoIP 路由规则存在
 target_rule_sets = ["geosite-google", "geosite-youtube", "geoip-google"]
 rule_exists = False
 for r in rules:
     rs = r.get("rule_set", [])
     if isinstance(rs, list) and any(x in rs for x in ["geosite-google", "geosite-youtube"]):
-        # 更新该规则指向 warp-out 并补齐
         for t in target_rule_sets:
             if t not in rs:
                 rs.append(t)
@@ -172,9 +180,7 @@ for r in rules:
         break
 
 if not rule_exists:
-    # 插入在嗅探动作之后
-    insert_idx = 1 if len(rules) > 0 and rules[0].get("action") == "sniff" else 0
-    rules.insert(insert_idx, {
+    rules.append({
         "rule_set": target_rule_sets,
         "outbound": warp_tag
     })
@@ -225,7 +231,7 @@ if [ -n "$SINGBOX_SERVICE" ]; then
     fi
 fi
 
-# 10. 创建规则集定期更新脚本
+# 10. 创建规则集定期更新脚本与 WARP 状态检查脚本
 UPDATE_SCRIPT="$CONFIG_DIR/update-rules.sh"
 cat << EOF > "$UPDATE_SCRIPT"
 #!/usr/bin/env bash
@@ -240,9 +246,131 @@ fi
 echo "[*] Rule sets updated and service restarted successfully."
 EOF
 chmod +x "$UPDATE_SCRIPT"
-log_succ "维护更新脚本已生成: $UPDATE_SCRIPT"
 
-echo ""
+CHECK_SCRIPT="$CONFIG_DIR/check-warp.sh"
+cat << 'EOF' > "$CHECK_SCRIPT"
+#!/usr/bin/env bash
+python3 - << 'PYEOF'
+import urllib.request
+import urllib.parse
+import json
+import base64
+import subprocess
+import time
+
+def fetch_ip(proxy=None, ip_version=4):
+    url = f"https://ipv{ip_version}.icanhazip.com"
+    cmd = ["curl", "-s", "--max-time", "5"]
+    if proxy:
+        cmd.extend(["-x", proxy])
+    cmd.append(url)
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+def check_youtube_region(proxy=None):
+    cmd = ["curl", "-sI", "--max-time", "8"]
+    if proxy:
+        cmd.extend(["-x", proxy])
+    cmd.append("https://www.youtube.com")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        for line in res.stdout.splitlines():
+            if "VISITOR_PRIVACY_METADATA=" in line:
+                token = line.split("VISITOR_PRIVACY_METADATA=")[1].split(";")[0].strip()
+                token = urllib.parse.unquote(token)
+                raw = base64.b64decode(token)
+                if len(raw) >= 4 and raw[0] == 0x0a:
+                    cc_len = raw[1]
+                    return raw[2:2+cc_len].decode("ascii", errors="ignore").upper()
+    except Exception:
+        pass
+    return "UNKNOWN"
+
+def check_google_redirect(proxy=None):
+    cmd = ["curl", "-sI", "--max-time", "8"]
+    if proxy:
+        cmd.extend(["-x", proxy])
+    cmd.append("https://www.google.com")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        for line in res.stdout.splitlines():
+            if line.lower().startswith("location:"):
+                loc = line.split(":", 1)[1].strip()
+                if "google.com.hk" in loc:
+                    return "CN (重定向至 google.com.hk / 已送中)"
+                return f"重定向至 {loc}"
+        if "HTTP/2 200" in res.stdout or "HTTP/1.1 200" in res.stdout:
+            return "正常 (未送中，停留在 google.com)"
+    except Exception:
+        pass
+    return "检测超时/未知"
+
+proxy = "socks5h://127.0.0.1:40000"
+
+# 检查 WARP IP
+v4_ip = fetch_ip(proxy, 4)
+v6_ip = fetch_ip(proxy, 6)
+yt_region = check_youtube_region(proxy)
+google_status = check_google_redirect(proxy)
+
+# 原生 IP 对比
+native_yt = check_youtube_region(None)
+native_v4 = fetch_ip(None, 4)
+
+print("\n" + "="*62)
+print("       Cloudflare WARP 出口 IP 与属地分流检测报告")
+print("="*62)
+print(f" WARP IPv4 地址 : {v4_ip if v4_ip else '未分配或不可达'}")
+print(f" WARP IPv6 地址 : {v6_ip if v6_ip else '未分配或不可达'}")
+print("-" * 62)
+print(f" Google 搜索状态: {google_status}")
+
+if yt_region == "CN":
+    print(f" YouTube 判定区 : \033[31m{yt_region} (警告：当前 WARP IP 同样被识别为送中！)\033[0m")
+    print("                 -> 可尝试执行: warp-cli disconnect && warp-cli connect 刷新 IP")
+else:
+    print(f" YouTube 判定区 : \033[32m{yt_region} (正常，解除送中，支持 YouTube Premium)\033[0m")
+
+print("-" * 62)
+print(f" VPS 原生出口 IP: {native_v4 if native_v4 else '未知'} (YouTube 判定: {native_yt})")
+print("="*62 + "\n")
+PYEOF
+EOF
+chmod +x "$CHECK_SCRIPT"
+
+# 11. 检查 WARP 出口 IP 及其属地，若不幸分到送中 IP 则自动重拨刷新 (最多尝试 3 次)
+log_info "正在检验 WARP 出口 IP 及 Google/YouTube 属地判定..."
+for attempt in 1 2 3; do
+    YT_CHECK="$(curl -sI --max-time 8 -x socks5h://127.0.0.1:${WARP_PORT} https://www.youtube.com | grep -i "VISITOR_PRIVACY_METADATA=" || true)"
+    CURRENT_REGION=""
+    if [ -n "$YT_CHECK" ]; then
+        RAW_TOKEN="$(echo "$YT_CHECK" | sed -n 's/.*VISITOR_PRIVACY_METADATA=\([^;]*\).*/\1/p')"
+        CURRENT_REGION="$(python3 -c "import urllib.parse, base64; raw=base64.b64decode(urllib.parse.unquote('$RAW_TOKEN')); print(raw[2:2+raw[1]].decode('ascii', errors='ignore'))" 2>/dev/null || true)"
+    fi
+
+    if [ "$CURRENT_REGION" = "CN" ]; then
+        if [ "$attempt" -lt 3 ]; then
+            log_warn "当前分配到的 WARP IP 被 YouTube 识别为 CN (送中)，正在自动重拨刷新 WARP IP (第 $attempt/3 次)..."
+            warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
+            sleep 1
+            warp-cli --accept-tos connect >/dev/null 2>&1 || true
+            sleep 3
+        else
+            log_warn "重拨 3 次后 WARP IP 仍处于 CN 地区，稍后可通过运行 $CONFIG_DIR/check-warp.sh 再次查看。"
+        fi
+    else
+        break
+    fi
+done
+
+# 打印最终检测报告
+bash "$CHECK_SCRIPT"
+
 echo -e "${GREEN}================================================================${NC}"
 echo -e "${GREEN}  部署成功！已将 Google/YouTube 流量自动分流至 Cloudflare WARP  ${NC}"
 echo -e "${GREEN}================================================================${NC}"
@@ -250,4 +378,10 @@ echo -e "配置文件: ${CYAN}$SINGBOX_CONFIG_PATH${NC}"
 echo -e "备份文件: ${YELLOW}$BACKUP_PATH${NC}"
 echo -e "WARP 端口: ${CYAN}127.0.0.1:${WARP_PORT} (SOCKS5)${NC}"
 echo -e "更新脚本: ${CYAN}$UPDATE_SCRIPT${NC}"
+echo -e "检测脚本: ${CYAN}$CHECK_SCRIPT${NC}"
+echo ""
+echo -e "${YELLOW}[注意] 如果客户端浏览器（Chrome 等）未立即生效，请：${NC}"
+echo -e "  1. 打开浏览器【无痕窗口】或清除 youtube.com 的 Cookie 缓存；"
+echo -e "  2. 关闭浏览器并重新打开（释放此前的长连接与 QUIC 会话）；"
+echo -e "  3. 确认已在 YouTube 网页中正常登录你的 Google 账号。"
 echo ""

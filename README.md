@@ -1,11 +1,11 @@
-# Cloudflare WARP + sing-box 优雅解决出口 IP 送中方案
+# Cloudflare WARP 解决 Google 送中问题
 
-本方案与自动化脚本专为解决自建节点、境外 VPS 出口 IP 遭遇 **“Google 送中”**（被识别为中国大陆导致 Google 搜索强制跳转、Gemini/Google One 无法使用、YouTube Premium 画中画与后台播放受限等）而设计。
+本自动化脚本专为解决自建节点、境外 VPS 出口 IP 遭遇 **“Google 送中”**（被识别为中国大陆导致 Google 搜索强制跳转、Gemini/Google One 无法使用、YouTube Premium 画中画与后台播放受限等）而设计。适用于 sing-box 代理。
 
 通过配置官方 **Cloudflare WARP 运行于本地 SOCKS5 代理模式**，并结合 **sing-box 规则路由分流**，实现：
-- **目标流量精准分流**：Google、YouTube、Gemini 相关域名及 IP 流量经由 Cloudflare WARP 干净出口送达；
-- **原生速度与低延迟**：其他常规流量仍走 VPS 原生网络出口，避免无谓的全局套娃与性能损耗；
-- **安全与零失联风险**：WARP 仅监听于本地回环地址（`127.0.0.1:40000`），不接管 VPS 主网关与路由表，绝不影响 SSH 远程连接与原有服务。
+- 目标流量分流：Google、YouTube、Gemini 相关域名及 IP 流量经由 Cloudflare WARP 出口送达；
+- 其他常规流量仍走 VPS 原生网络出口，避免无谓的全局套娃与性能损耗；
+- WARP 仅监听于本地回环地址（`127.0.0.1:40000`），不接管 VPS 主网关与路由表，不影响 SSH 远程连接与原有服务。
 
 ---
 
@@ -13,15 +13,15 @@
 
 ```mermaid
 flowchart LR
-    Client["客户端 (手机 / 电脑)"] -->|VLESS / Hysteria2 / SS| Singbox["sing-box 代理服务端"]
+    Client["客户端 (手机 / 电脑)"] -->|"VLESS / Hysteria2 / SS"| Singbox["sing-box 代理服务端"]
     
-    Singbox -->|Sniff 域名 & 规则匹配| Router{"路由分流 (Route)"}
+    Singbox -->|"域名嗅探与规则匹配"| Router{"路由分流 (Route)"}
     
-    Router -->|Google / YouTube / Gemini| Warp["WARP 本地代理 (127.0.0.1:40000)"]
-    Router -->|其他常规流量| Direct["原生出口 (Direct)"]
+    Router -->|"Google / YouTube / Gemini"| Warp["WARP 本地代理 (127.0.0.1:40000)"]
+    Router -->|"其他常规流量"| Direct["原生出口 (Direct)"]
     
-    Warp -->|Cloudflare 干净 IP 出口| TargetGoogle["Google / YouTube / Gemini"]
-    Direct -->|VPS 原生 IP 出口| TargetWeb["常规互联网"]
+    Warp -->|"Cloudflare 干净 IP 出口"| TargetGoogle["Google / YouTube / Gemini"]
+    Direct -->|"VPS 原生 IP 出口"| TargetWeb["常规互联网"]
 ```
 
 ---
@@ -162,6 +162,15 @@ curl -sSL https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/ge
         "action": "sniff"
       },
       {
+        "network": "udp",
+        "port": 443,
+        "rule_set": [
+          "geosite-google",
+          "geosite-youtube"
+        ],
+        "action": "reject"
+      },
+      {
         "rule_set": [
           "geosite-google",
           "geosite-youtube",
@@ -244,6 +253,24 @@ echo "[*] Rule sets updated and service restarted successfully."
 - 采用本地二进制 `.srs` 规则集完全解耦网络依赖，实现 0 秒极速冷启动，稳定性佳。
 
 ### Q3: 如何验证分流是否生效？
-1. 在客户端浏览器无痕模式访问 `https://www.google.com`，页面底部应显示为 Cloudflare WARP 出口所在城市（如 San Jose / Los Angeles），而非中国；
+1. 在客户端浏览器无痕模式访问 `https://www.google.com`，页面底部应显示为 Cloudflare WARP 出口所在城市（如 Tokyo / San Jose），而非中国；
 2. 访问 `https://gemini.google.com` 正常可用，无地区限制提示；
 3. 打开 YouTube 视频并尝试后台播放或画中画功能，一切正常。
+
+### Q4: 申请到的 WARP IP 也有可能是“送中”的怎么办？
+- Cloudflare WARP 分配的部分 IP 段（尤其是部分 IPv6 地址）确实可能偶尔被 Google/YouTube 错误标记为 CN（送中）；
+- 本自动化脚本已内置**自动检测与防送中机制**：部署完成时会自动提取 YouTube 内部地域判定 Cookie（`VISITOR_PRIVACY_METADATA`）进行校验，若发现当前 WARP IP 为 `CN`，会自动重拨刷新 IP；
+- 若日后使用中发现送中，只需执行：
+  ```bash
+  warp-cli disconnect && warp-cli connect
+  # 查看当前分配到的 WARP IP 及属地状态
+  bash /etc/vless-reality/check-warp.sh
+  ```
+
+### Q5: 部署后 YouTube 为什么依然没有显示 Premium 或仍被识别为 CN？
+1. **浏览器 QUIC (HTTP/3) 缓存与长连接**：
+   Chrome / Edge 默认开启 QUIC（UDP 443）。旧的连接在服务端配置变更前建立，浏览器会长时间复用该长连接；本脚本已在 sing-box 中配置针对 Google/YouTube 的 UDP 443 拦截规则，迫使浏览器降级为走 WARP 的 TCP。**请务必重启浏览器或使用【无痕模式 (Incognito)】测试**；
+2. **本地 Cookie 与 LocalStorage**：
+   YouTube 会在本地 Cookie 中缓存上一次访问的地域标记（如 `gl=CN`）。打开无痕窗口或在浏览器设置中清除 `youtube.com` 的 Cookie 即可刷新；
+3. **确认账号已登录**：
+   YouTube 只有在**登录了购买过 Premium 的 Google 账号**且所在地区支持时才会展示 `YouTube Premium` Logo；若未登录，则仅显示默认的 `YouTube`。
