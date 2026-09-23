@@ -12,6 +12,7 @@
 ## 架构拓扑
 
 ```mermaid
+%%{init: {'themeVariables': { 'edgeLabelBackground': 'transparent' }}}%%
 flowchart TD
     Client["客户端 (手机 / 电脑)"]
     Client -->|"代理连接"| Singbox["sing-box 代理服务端"]
