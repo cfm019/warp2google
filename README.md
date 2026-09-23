@@ -84,6 +84,13 @@ curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.
 > ==============================================================
 > ```
 
+### 方式 4：一键卸载与还原配置 (uninstall_warp_singbox.sh)
+如需卸载 WARP 并将 sing-box 还原为初始直连状态：
+```bash
+curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash
+```
+*(支持追加 `--keep-warp` 保留 WARP 客户端，或手动传入配置文件路径)*
+
 > [!TIP]
 > 部署脚本具备**幂等性**与**语法回滚机制**：
 > - 自动查找常见配置文件路径（如 `/etc/vless-reality/singbox.json` 或 `/etc/sing-box/config.json`）；
@@ -276,6 +283,38 @@ echo "[*] Rule sets updated and service restarted successfully."
 # 每周日凌晨 4 点自动更新规则集
 0 4 * * 0 /etc/sing-box/update-rules.sh >/dev/null 2>&1
 ```
+
+---
+
+### 一键卸载与配置还原 (uninstall_warp_singbox.sh)
+
+若不再需要 WARP 分流，可随时使用一键卸载脚本安全还原。脚本具备全流程幂等与安全防护：
+- 自动备份当前 sing-box 配置文件（生成 `.bak.uninstall.*`）；
+- 从 sing-box 中安全剔除 `warp-out` 出口、Google/YouTube QUIC 拦截与分流路由规则；
+- 校验配置语法并重启 sing-box 服务，恢复所有流量走原生直连；
+- 清理本地 `.srs` 规则集、`update-rules.sh`、`check-warp.sh` 以及对应的 crontab 定时任务；
+- 注销 WARP 设备、停止并禁用 `warp-svc` 服务；
+- 彻底卸载 `cloudflare-warp` 客户端及官方 APT 软件源。
+
+#### 远程一键运行：
+```bash
+curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash
+```
+
+#### 本地运行：
+```bash
+sudo bash uninstall_warp_singbox.sh
+```
+
+> [!TIP]
+> - 若你想保留 `cloudflare-warp` 客户端供其他用途使用，仅清理 sing-box 分流与规则，可追加 `--keep-warp` 参数：
+>   ```bash
+>   sudo bash uninstall_warp_singbox.sh --keep-warp
+>   ```
+> - 如需指定非默认路径的配置文件：
+>   ```bash
+>   sudo bash uninstall_warp_singbox.sh /path/to/singbox.json
+>   ```
 
 ---
 
