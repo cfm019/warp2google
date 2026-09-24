@@ -32,8 +32,12 @@ def fetch_ip(proxy=None, ip_version=4):
         pass
     return None
 
-def check_youtube_region(proxy=None):
+def check_youtube_region(proxy=None, ip_version=None):
     cmd = ["curl", "-sI", "--max-time", "8"]
+    if ip_version == 4:
+        cmd.append("-4")
+    elif ip_version == 6:
+        cmd.append("-6")
     if proxy:
         cmd.extend(["-x", proxy])
     cmd.append("https://www.youtube.com")
@@ -70,6 +74,13 @@ def check_google_redirect(proxy=None):
         pass
     return "检测超时/未知"
 
+def format_native_yt(region):
+    if not region or region == "UNKNOWN":
+        return "未知/不可达"
+    if region == "CN":
+        return "\033[31mCN (已送中)\033[0m"
+    return f"\033[32m{region}\033[0m"
+
 # 检查 WARP IP
 v4_ip = fetch_ip(proxy, 4)
 v6_ip = fetch_ip(proxy, 6)
@@ -82,9 +93,12 @@ else:
     yt_region = None
     google_status = f"代理未就绪 (端口 {warp_port} 无法连通)"
 
-# 原生 IP 对比
-native_yt = check_youtube_region(None)
+# 原生 IP 及属地对比 (分别检测 v4 与 v6)
 native_v4 = fetch_ip(None, 4)
+native_yt_v4 = check_youtube_region(None, 4) if native_v4 else None
+
+native_v6 = fetch_ip(None, 6)
+native_yt_v6 = check_youtube_region(None, 6) if native_v6 else None
 
 print("\n" + "="*62)
 print("       Cloudflare WARP 出口 IP 与属地分流检测报告")
@@ -105,7 +119,9 @@ else:
     print(f" YouTube 判定区 : \033[33mUNKNOWN (检测超时或响应解析失败)\033[0m")
 
 print("-" * 62)
-native_yt_desc = f"{native_yt} (已送中)" if native_yt == "CN" else (native_yt if native_yt and native_yt != "UNKNOWN" else "未知")
-print(f" VPS 原生出口 IP: {native_v4 if native_v4 else '未知'} (YouTube 判定: {native_yt_desc})")
+v4_str = f"{native_v4} (YouTube: {format_native_yt(native_yt_v4)})" if native_v4 else "未分配或不可达"
+v6_str = f"{native_v6} (YouTube: {format_native_yt(native_yt_v6)})" if native_v6 else "未分配或不可达"
+print(f" 原生 IPv4 出口 : {v4_str}")
+print(f" 原生 IPv6 出口 : {v6_str}")
 print("="*62 + "\n")
 PYEOF

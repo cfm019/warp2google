@@ -81,7 +81,8 @@ curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.
 >  Google 搜索状态: 正常 (未送中，停留在 google.com)
 >  YouTube 判定区 : JP (正常，解除送中，支持 YouTube Premium)
 > --------------------------------------------------------------
->  VPS 原生出口 IP: 198.51.100.xxx (YouTube 判定: CN (已送中))
+>  原生 IPv4 出口 : 198.51.100.xxx (YouTube: US)
+>  原生 IPv6 出口 : 2001:db8::1 (YouTube: CN (已送中))
 > ==============================================================
 > ```
 
