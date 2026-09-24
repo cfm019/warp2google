@@ -14,6 +14,7 @@ import json
 import base64
 import subprocess
 import sys
+import re
 
 warp_port = int("$WARP_PORT")
 proxy = f"socks5h://127.0.0.1:{warp_port}"
@@ -41,7 +42,7 @@ def check_youtube_region(proxy=None, ip_version=None):
     if proxy:
         cmd.extend(["-x", proxy])
     cmd.append("https://www.youtube.com")
-    region = "UNKNOWN"
+    region = None
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         for line in res.stdout.splitlines():
@@ -55,7 +56,9 @@ def check_youtube_region(proxy=None, ip_version=None):
     except Exception:
         pass
 
-    # 深度检测: 检查 YouTube Premium 是否可用 (很多机房 IP Cookie 显示 US, 但已被 Google 标记送中并禁用 Premium)
+    # 深度检测: 检查 YouTube Premium 页面
+    # 很多机房 IP 的 Privacy Cookie 默认显示 US，但其实际归属地可通过 Premium 页面中的 countryCode / GL 精准获取；
+    # 若被 Google 标记送中，页面则会直接提示不可用。
     p_cmd = ["curl", "-sL", "--max-time", "8"]
     if ip_version == 4:
         p_cmd.append("-4")
@@ -66,12 +69,22 @@ def check_youtube_region(proxy=None, ip_version=None):
     p_cmd.extend(["-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "https://www.youtube.com/premium"])
     try:
         p_res = subprocess.run(p_cmd, capture_output=True, text=True, timeout=10)
-        if "YouTube Premium is not available in your country" in p_res.stdout:
+        if "YouTube Premium is not available in your country" in p_res.stdout or "Premium is not available" in p_res.stdout:
             return "CN"
+        
+        # 优先提取精准的 countryCode (如 JP, US, SG, HK 等)
+        cc_match = re.search(r'\"countryCode\":\s*\"([A-Z]{2})\"', p_res.stdout)
+        if cc_match:
+            return cc_match.group(1)
+
+        # 其次提取 INNERTUBE_CONTEXT_GL / GL
+        gl_match = re.search(r'\"(?:GL|INNERTUBE_CONTEXT_GL)\":\s*\"([A-Z]{2})\"', p_res.stdout)
+        if gl_match:
+            return gl_match.group(1)
     except Exception:
         pass
 
-    return region
+    return region or "UNKNOWN"
 
 def check_google_redirect(proxy=None):
     cmd = ["curl", "-sI", "--max-time", "8"]
