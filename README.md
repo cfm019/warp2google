@@ -42,31 +42,32 @@ flowchart LR
 
 ---
 
-## 一键自动化安装
+## 一键自动化
 
 适用于 **Debian 11/12+** 或 **Ubuntu 20.04/22.04/24.04+** 系统。
 
-### 方式 1：直接在远程服务器上运行
-登录你的 VPS 执行以下命令：
+### 安装
+
+以下一键命令，自动完成 WARP 安装、本地 SOCKS5 代理配置、规则集下载、sing-box 路由分流与地域检测：
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/setup_warp_singbox.sh | sudo bash
 ```
-或下载本地执行：
-```bash
-sudo bash setup_warp_singbox.sh
-```
 
-### 方式 2：从控制机通过 SSH 一键推送到远程服务器
-如果你在本地管理多台服务器，可直接通过标准 SSH 管道推送到目标机器执行：
-```bash
-ssh root@<YOUR_SERVER_IP> "bash -s" < setup_warp_singbox.sh
-```
+> [!TIP]
+> 部署脚本具备**幂等性**与**语法回滚机制**：
+> - 自动查找常见配置文件路径（如 `/etc/vless-reality/singbox.json` 或 `/etc/sing-box/config.json`）；
+> - 修改前自动创建带时间戳的 `.bak` 备份文件；
+> - 修改后自动调用 `sing-box check` 进行语法自检，出错自动回滚。
 
-### 方式 3：随时独立进行状态与属地诊断 (check-warp.sh)
-若只需排查当前 WARP IP 是否被 Google/YouTube 送中，无需重新配置 sing-box，可直接运行独立自检脚本：
+### 检查
+
+若只需排查当前 WARP IP 是否被 Google/YouTube 送中，可随时直接运行独立自检脚本：
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.sh | bash
 ```
+
 > [!NOTE]
 > 诊断脚本默认检测本地 SOCKS5 端口 `40000`，如使用自定义端口可直接传参，例如 `bash check-warp.sh 40001`。
 > 脚本将直观展示当前 WARP IPv4 / IPv6、Google 搜索重定向状态、YouTube 权威判定地区（解析 `VISITOR_PRIVACY_METADATA` 确认是否支持 Premium）及与 VPS 原生出口的对比：
@@ -84,18 +85,29 @@ curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/check-warp.
 > ==============================================================
 > ```
 
-### 方式 4：一键卸载与还原配置 (uninstall_warp_singbox.sh)
-如需卸载 WARP 并将 sing-box 还原为初始直连状态：
+### 卸载
+
+一键卸载脚本，安全还原所有配置。脚本具备全流程幂等与安全防护：
+- 自动备份当前 sing-box 配置文件（生成 `.bak.uninstall.*`）；
+- 从 sing-box 中安全剔除 `warp-out` 出口、Google/YouTube QUIC 拦截与分流路由规则；
+- 校验配置语法并重启 sing-box 服务，恢复所有流量走原生直连；
+- 清理本地 `.srs` 规则集、`update-rules.sh`、`check-warp.sh` 以及对应的 crontab 定时任务；
+- 注销 WARP 设备、停止并禁用 `warp-svc` 服务；
+- 彻底卸载 `cloudflare-warp` 客户端及官方 APT 软件源。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash
 ```
-*(支持追加 `--keep-warp` 保留 WARP 客户端，或手动传入配置文件路径)*
 
 > [!TIP]
-> 部署脚本具备**幂等性**与**语法回滚机制**：
-> - 自动查找常见配置文件路径（如 `/etc/vless-reality/singbox.json` 或 `/etc/sing-box/config.json`）；
-> - 修改前自动创建带时间戳的 `.bak` 备份文件；
-> - 修改后自动调用 `sing-box check` 进行语法自检，出错自动回滚。
+> - 若想保留 `cloudflare-warp` 客户端供其他用途使用，仅清理 sing-box 分流与规则，可追加 `--keep-warp` 参数：
+>   ```bash
+>   curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash -s -- --keep-warp
+>   ```
+> - 如需指定非默认路径的配置文件，可直接传入路径参数：
+>   ```bash
+>   curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash -s -- /path/to/singbox.json
+>   ```
 
 ---
 
@@ -283,38 +295,6 @@ echo "[*] Rule sets updated and service restarted successfully."
 # 每周日凌晨 4 点自动更新规则集
 0 4 * * 0 /etc/sing-box/update-rules.sh >/dev/null 2>&1
 ```
-
----
-
-### 一键卸载与配置还原 (uninstall_warp_singbox.sh)
-
-若不再需要 WARP 分流，可随时使用一键卸载脚本安全还原。脚本具备全流程幂等与安全防护：
-- 自动备份当前 sing-box 配置文件（生成 `.bak.uninstall.*`）；
-- 从 sing-box 中安全剔除 `warp-out` 出口、Google/YouTube QUIC 拦截与分流路由规则；
-- 校验配置语法并重启 sing-box 服务，恢复所有流量走原生直连；
-- 清理本地 `.srs` 规则集、`update-rules.sh`、`check-warp.sh` 以及对应的 crontab 定时任务；
-- 注销 WARP 设备、停止并禁用 `warp-svc` 服务；
-- 彻底卸载 `cloudflare-warp` 客户端及官方 APT 软件源。
-
-#### 远程一键运行：
-```bash
-curl -fsSL https://raw.githubusercontent.com/cfm019/warp2google/main/uninstall_warp_singbox.sh | sudo bash
-```
-
-#### 本地运行：
-```bash
-sudo bash uninstall_warp_singbox.sh
-```
-
-> [!TIP]
-> - 若你想保留 `cloudflare-warp` 客户端供其他用途使用，仅清理 sing-box 分流与规则，可追加 `--keep-warp` 参数：
->   ```bash
->   sudo bash uninstall_warp_singbox.sh --keep-warp
->   ```
-> - 如需指定非默认路径的配置文件：
->   ```bash
->   sudo bash uninstall_warp_singbox.sh /path/to/singbox.json
->   ```
 
 ---
 
