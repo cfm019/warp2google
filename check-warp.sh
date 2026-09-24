@@ -73,8 +73,14 @@ def check_google_redirect(proxy=None):
 # 检查 WARP IP
 v4_ip = fetch_ip(proxy, 4)
 v6_ip = fetch_ip(proxy, 6)
-yt_region = check_youtube_region(proxy)
-google_status = check_google_redirect(proxy)
+proxy_alive = bool(v4_ip or v6_ip)
+
+if proxy_alive:
+    yt_region = check_youtube_region(proxy)
+    google_status = check_google_redirect(proxy)
+else:
+    yt_region = None
+    google_status = f"代理未就绪 (端口 {warp_port} 无法连通)"
 
 # 原生 IP 对比
 native_yt = check_youtube_region(None)
@@ -88,13 +94,18 @@ print(f" WARP IPv6 地址 : {v6_ip if v6_ip else '未分配或不可达'}")
 print("-" * 62)
 print(f" Google 搜索状态: {google_status}")
 
-if yt_region == "CN":
+if not proxy_alive:
+    print(f" YouTube 判定区 : \033[33m代理未就绪 (请先安装或启动 Cloudflare WARP)\033[0m")
+elif yt_region == "CN":
     print(f" YouTube 判定区 : \033[31m{yt_region} (警告：当前 WARP IP 同样被识别为送中！)\033[0m")
     print("                 -> 可在服务器上执行: warp-cli disconnect && warp-cli connect 刷新 IP")
-else:
+elif yt_region and yt_region != "UNKNOWN":
     print(f" YouTube 判定区 : \033[32m{yt_region} (正常，解除送中，支持 YouTube Premium)\033[0m")
+else:
+    print(f" YouTube 判定区 : \033[33mUNKNOWN (检测超时或响应解析失败)\033[0m")
 
 print("-" * 62)
-print(f" VPS 原生出口 IP: {native_v4 if native_v4 else '未知'} (YouTube 判定: {native_yt})")
+native_yt_desc = f"{native_yt} (已送中)" if native_yt == "CN" else (native_yt if native_yt and native_yt != "UNKNOWN" else "未知")
+print(f" VPS 原生出口 IP: {native_v4 if native_v4 else '未知'} (YouTube 判定: {native_yt_desc})")
 print("="*62 + "\n")
 PYEOF
