@@ -41,6 +41,7 @@ def check_youtube_region(proxy=None, ip_version=None):
     if proxy:
         cmd.extend(["-x", proxy])
     cmd.append("https://www.youtube.com")
+    region = "UNKNOWN"
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         for line in res.stdout.splitlines():
@@ -50,10 +51,27 @@ def check_youtube_region(proxy=None, ip_version=None):
                 raw = base64.b64decode(token)
                 if len(raw) >= 4 and raw[0] == 0x0a:
                     cc_len = raw[1]
-                    return raw[2:2+cc_len].decode("ascii", errors="ignore").upper()
+                    region = raw[2:2+cc_len].decode("ascii", errors="ignore").upper()
     except Exception:
         pass
-    return "UNKNOWN"
+
+    # 深度检测: 检查 YouTube Premium 是否可用 (很多机房 IP Cookie 显示 US, 但已被 Google 标记送中并禁用 Premium)
+    p_cmd = ["curl", "-sL", "--max-time", "8"]
+    if ip_version == 4:
+        p_cmd.append("-4")
+    elif ip_version == 6:
+        p_cmd.append("-6")
+    if proxy:
+        p_cmd.extend(["-x", proxy])
+    p_cmd.extend(["-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "https://www.youtube.com/premium"])
+    try:
+        p_res = subprocess.run(p_cmd, capture_output=True, text=True, timeout=10)
+        if "YouTube Premium is not available in your country" in p_res.stdout:
+            return "CN"
+    except Exception:
+        pass
+
+    return region
 
 def check_google_redirect(proxy=None):
     cmd = ["curl", "-sI", "--max-time", "8"]
